@@ -6,6 +6,9 @@ CustomController::CustomController(DataContainer &dc, RobotData &rd) : dc_(dc), 
 
 	setWeights();
 	readMocapData();
+
+	vel_scale_sub = node.subscribe<std_msgs::Float32>("vel_scale", 10, &CustomController::velScaleCallback, this);
+
 }
 
 Eigen::VectorQd CustomController::getControl()
@@ -26,10 +29,8 @@ void CustomController::computeSlow()
 		{
 			processObservation();
 			feedforwardPolicy();
-			// cout<<mode_time - mode_time_pre<<endl;
 			mode_time_pre = mode_time;
 		}
-		
 		torqueCalculation();
     }
 }
@@ -42,6 +43,12 @@ void CustomController::computeFast()
     else if (tc.mode == 11)
     {
     }
+}
+
+void CustomController::velScaleCallback(const std_msgs::Float32::ConstPtr& msg)
+{
+	vel_scale = msg->data;
+	mocap_cycle_dt = vel_scale*0.033332;
 }
 
 void CustomController::setWeights()
@@ -297,14 +304,21 @@ void CustomController::processObservation()
 
 	// Pelvis Z position
 	obs[57] = rd_.q_virtual_(2); //rd_.link_[Pelvis].xpos(2);
-
+	
+	obs[58] = vel_scale; 
 	// cout<< "OBS: " << obs[0]<<" " << rd_.link_[Pelvis].xpos(2) << " " << obs[3] << " " << obs[4] << endl;
+	// cout<<"OBS: " ;
+	// for(int i=0; i<59; i++)
+	// {
+	// 	cout<< "\t" << obs[i];
+	// }
+	// cout<<endl;
 }
 
 void CustomController::feedforwardPolicy()
 {
 	// Normalize
-	for(int i=0; i<58; i++)
+	for(int i=0; i<59; i++)
 	{
 		input[i] = (obs[i]-obs_mean[i])/sqrt(obs_var[i]+1.0e-08);
 	}
@@ -314,9 +328,9 @@ void CustomController::feedforwardPolicy()
 	for(int row=0; row<256; row++)
 	{
 		hidden1[row] = b_ih1[row];
-		for(int col=0; col<58; col++)
+		for(int col=0; col<59; col++)
 		{
-			hidden1[row] +=  W_ih1[58*row+col] * input[col];
+			hidden1[row] +=  W_ih1[59*row+col] * input[col];
 		}
 		if (hidden1[row] < 0.0)
 			hidden1[row] = 0.0;
@@ -360,13 +374,14 @@ void CustomController::feedforwardPolicy()
 void CustomController::torqueCalculation()
 {
 	// Leg Torque
-	float gear_ratio = 200; //DyrosMath::cubic(mode_time, 0.0, 5*mocap_cycle_period, 200.0, 100.0, 0.0, 0.0);
-	cout<<"GR: " << gear_ratio<<endl;
+	float gear_ratio = 1.0; //DyrosMath::cubic(mode_time, 0.0, 5*mocap_cycle_period, 200.0, 100.0, 0.0, 0.0);
+	// cout<<"GR: " << gear_ratio<<endl;
 	for(int i = 0; i<6; i++)
 	{
 		ControlVal_(i) = (900*(target_data_qpos[i] + policy_output[i] - rd_.q_(i)) + 60*(-rd_.q_dot_(i)))/gear_ratio;
 		ControlVal_(i+6) = (900*(target_data_qpos[i+6] + policy_output[i+6] - rd_.q_(i+6)) + 60*(-rd_.q_dot_(i+6)))/gear_ratio;
 	}
+
 	// Waist Torque
 	for(int i = 0; i<3; i++)
 	{
@@ -383,17 +398,17 @@ void CustomController::torqueCalculation()
 
 	// Redundant Joints
 	// Arm Link Joint
-	ControlVal_(18) = 0.0;//(100*(-3.14/2.0 - rd_.q_(18)) + 10*(-rd_.q_dot_(18)))/gear_ratio; // Left
-	ControlVal_(28) = 0.0;//(100*(3.14/2.0 - rd_.q_(28)) + 10*(-rd_.q_dot_(28)))/gear_ratio; // Right
+	ControlVal_(18) = (100*(-3.14/2.0 - rd_.q_(18)) + 10*(-rd_.q_dot_(18)))/gear_ratio; // Left
+	ControlVal_(28) = (100*(3.14/2.0 - rd_.q_(28)) + 10*(-rd_.q_dot_(28)))/gear_ratio; // Right
 	// Neck Joints
-	ControlVal_(23) = 0.0;//(100*(0.0 - rd_.q_(23)) + 5*(-rd_.q_dot_(23)))/gear_ratio;
-	ControlVal_(24) = 0.0;//(100*(0.0 - rd_.q_(24)) + 5*(-rd_.q_dot_(24)))/gear_ratio;
+	ControlVal_(23) = (100*(0.0 - rd_.q_(23)) + 5*(-rd_.q_dot_(23)))/gear_ratio;
+	ControlVal_(24) = (100*(0.0 - rd_.q_(24)) + 5*(-rd_.q_dot_(24)))/gear_ratio;
 	// Lower Arm Joints
-	ControlVal_(20) = 0.0;//(100*(0.0 - rd_.q_(20)) + 5*(-rd_.q_dot_(20)))/gear_ratio; // Left ForeArm
-	ControlVal_(21) = 0.0;//(100*(0.0 - rd_.q_(21)) + 5*(-rd_.q_dot_(21)))/gear_ratio; // Left Wrist1
-	ControlVal_(22) = 0.0;//(100*(0.0 - rd_.q_(22)) + 5*(-rd_.q_dot_(22)))/gear_ratio; // Left Wrist2
-	ControlVal_(30) = 0.0;//(100*(0.0 - rd_.q_(30)) + 5*(-rd_.q_dot_(30)))/gear_ratio; // Right ForeArm
-	ControlVal_(31) = 0.0;//(100*(0.0 - rd_.q_(31)) + 5*(-rd_.q_dot_(31)))/gear_ratio; // Right Wrist1 
-	ControlVal_(32) = 0.0;//(100*(0.0 - rd_.q_(32)) + 5*(-rd_.q_dot_(32)))/gear_ratio; // Right Wrist2
+	ControlVal_(20) = (100*(0.0 - rd_.q_(20)) + 5*(-rd_.q_dot_(20)))/gear_ratio; // Left ForeArm
+	ControlVal_(21) = (100*(0.0 - rd_.q_(21)) + 5*(-rd_.q_dot_(21)))/gear_ratio; // Left Wrist1
+	ControlVal_(22) = (100*(0.0 - rd_.q_(22)) + 5*(-rd_.q_dot_(22)))/gear_ratio; // Left Wrist2
+	ControlVal_(30) = (100*(0.0 - rd_.q_(30)) + 5*(-rd_.q_dot_(30)))/gear_ratio; // Right ForeArm
+	ControlVal_(31) = (100*(0.0 - rd_.q_(31)) + 5*(-rd_.q_dot_(31)))/gear_ratio; // Right Wrist1 
+	ControlVal_(32) = (100*(0.0 - rd_.q_(32)) + 5*(-rd_.q_dot_(32)))/gear_ratio; // Right Wrist2
 	// ControlVal_ = wbc_.gravity_compensation_torque(rd_, false, false);
 }
