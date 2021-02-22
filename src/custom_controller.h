@@ -46,7 +46,7 @@ private:
     float hidden2[256];
     float policy_output[23];
 
-    float vel_scale = 2.0;
+    float vel_scale = 1.0;
     float policy_eval_dt = 0.001;
     float mocap_data[39][31];
 	float mocap_cycle_dt = vel_scale*0.033332;
